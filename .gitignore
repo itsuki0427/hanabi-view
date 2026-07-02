@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+
+# 大容量データ（再生成可能・DLで取得可能）
+data/plateau/*.zip
+data/plateau/_tmp_extract/
+data/dem_tiles/
+data/buildings_f*.geojson
+
+# 計算途中ファイル
+web/data/*.part.json
