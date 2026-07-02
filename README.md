@@ -1,54 +1,65 @@
 # hanabi-view
 
-関西圏 花火大会 視認可能エリア マップ。
+関西の花火大会が「どこから・どれだけ見えるか」を地図で確認できるサイト。
 
-## 何ができる
+3D都市モデル（PLATEAU）の建物データと国土地理院の標高データを使い、打上地点から各地点への視線が建物・地形に遮られるかを計算しています。
 
-- 関西圏（2026年）主要花火大会を地図上で選択
-- 任意地点から「最低何mから見えるか」「打上高度範囲のうち何%遮蔽されてないか」を可視化
-- PLATEAU 3D都市モデル + 国土地理院DEM で 建物・地形の遮蔽を計算
+## 対象大会（2026年）
 
-## スコープ
+なにわ淀川花火大会 / 天神祭奉納花火 / 水都くらわんか花火大会 / 岸和田港まつり花火大会 / 姫路みなと祭海上花火大会 / みなと舞鶴ちゃった花火大会 / 長浜・北びわ湖大花火大会
 
-- 対象: 2026年 関西 7大会（淀川・天神祭・くらわんか・岸和田・姫路・舞鶴・長浜）
-  - PLATEAU（3D建物データ）対応自治体の大会のみ。神戸・芦屋・大津等は未対応のため対象外
-- 精度: 建物・地形のみ考慮。木・電線・架線は無視（目安）
-- 配信: 完全静的（GeoJSON + MapLibre）
+※3D建物データ（PLATEAU）が整備済みの自治体で開催される大会のみ対象
+
+## 見え方の読み方
+
+- **緑**: 低い花火までほぼ全部見える
+- **黄〜橙**: 高く上がる花火だけ見える
+- **赤**: 建物・地形に遮られてほぼ見えない
+
+地図をクリックすると「その場所から何m以上の高さの花火が見えるか」を表示します。
+
+## 精度について（必読）
+
+このマップは**目安**です。以下は考慮していません:
+
+- 街路樹・電線・仮設物・新築建物（データ更新後のもの）
+- 群衆・観覧環境
+- 花火の開花サイズ（号数から推定した高さのみ使用）
+- 一部大会は打上地点・最大号数が公式未発表のため推定値（地図上に注記あり）
+
+「見える」表示でも現地で見えない場合があります。逆も然り。
 
 ## データソース
 
-- PLATEAU 3D都市モデル: G空間情報センター（無料）
-- 標高DEM: 国土地理院 基盤地図情報5mメッシュ（無料）
-- 地図タイル: 国土地理院 地理院タイル（無料・要出典明記）
-- 花火大会データ: 手動収集（`data/festivals.csv`）
+| データ | 提供元 | ライセンス |
+|---|---|---|
+| 3D都市モデル（建物） | [Project PLATEAU](https://www.mlit.go.jp/plateau/)（国土交通省） | [PLATEAUサイトポリシー](https://www.mlit.go.jp/plateau/site-policy/)（商用利用可） |
+| 標高タイル・地図タイル | [国土地理院](https://maps.gsi.go.jp/development/ichiran.html) | [国土地理院コンテンツ利用規約](https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html)（出典明記） |
+| 大会情報 | 各大会公式サイト等（`data/festivals.csv` の source_url 参照） | — |
 
-## ディレクトリ構成
+地図ライブラリ: [MapLibre GL JS](https://maplibre.org/)（BSD-3-Clause）
 
-- `data/` 入力データ（CSV）・中間生成物
-- `scripts/` 計算スクリプト（Python）
-- `web/` フロントエンド（MapLibre + Vanilla TS）
-- `docs/` 仕様書・設計メモ
+## 仕組み
 
-## 使い方（ローカル）
+1. `data/festivals.csv` — 大会マスタ（打上地点・最大号数・出典）
+2. `scripts/prepare_buildings.py` — PLATEAU CityGML から打上地点周辺の建物（footprint + 高さ）を抽出
+3. `scripts/batch_calc.py` — 各250mメッシュから打上地点への視線を高度10m刻みでサンプリングし、最低視認高度と遮蔽率を計算
+4. `web/` — 計算結果（GeoJSON）を MapLibre で表示する静的サイト
 
+## ローカル実行
+
+```bash
+# 表示のみ（計算済みデータ同梱）
+cd web && python -m http.server 8000
+
+# 再計算する場合
+pip install numpy shapely pyproj lxml requests pillow
+# PLATEAU CityGML zip を data/plateau/ に配置（data/plateau/DOWNLOAD_LIST.md 参照）
+python scripts/prepare_buildings.py <festival_id>
+python scripts/batch_calc.py <festival_id>
 ```
-cd web
-..\.venv\Scripts\python.exe -m http.server 8000
-# → http://localhost:8000
-```
 
-## データ更新手順
+## License
 
-1. `data/festivals.csv` を編集（大会情報の一次ソース。festivals.json は自動生成）
-2. PLATEAU zip を `data/plateau/` に配置（[DOWNLOAD_LIST.md](data/plateau/DOWNLOAD_LIST.md)）
-3. `python scripts/prepare_buildings.py <大会id>` — 建物データ生成
-4. `python scripts/batch_calc.py <大会id>` — 視認計算 + festivals.json 再生成
-
-## 進捗
-
-- [x] 試作: 淀川花火で視線計算 動作確認（河川敷=見える/ビル街=遮蔽 の妥当性確認済み）
-- [x] 大会データ収集（7大会・出典付き）
-- [x] フロント実装（大会切替・メッシュ塗り・クリック詳細）
-- [ ] 全7大会 バッチ計算（済: 淀川・天神祭 / 残: PLATEAU zip DL待ち）
-- [ ] 仕様書ドラフト
-- [ ] GitHubリポ・Cloudflare Pages デプロイ（我妻さん指示待ち）
+コード: MIT License（[LICENSE](LICENSE)）
+計算結果データ（`web/data/`）: 元データのライセンス（PLATEAU・国土地理院）に従います
