@@ -287,13 +287,19 @@
       .then(data => {
         resultData = data;
         if (onReady) onReady();  // 判定・復元はデータのみで可能
-        whenStyleReady(() => setupLayers(f, data));
+        whenStyleReady(() => {
+          try {
+            setupLayers(f, data);
+          } catch (err) {
+            console.error('レイヤ追加失敗:', err);
+          }
+        });
       })
       .catch((err) => { $('result').textContent = `結果データ未生成: ${err.message}`; });
   }
 
   function setupLayers(f, data) {
-    for (const layerId of ['viz', 'beam', 'launch', 'sel-pt']) {
+    for (const layerId of ['viz', 'beam', 'beam-blocked', 'launch', 'sel-pt']) {
       if (map.getLayer(layerId)) map.removeLayer(layerId);
     }
     for (const srcId of ['result', 'beam_src', 'launch_src', 'sel_src']) {
@@ -305,13 +311,16 @@
       paint: { 'fill-color': fillColorExpr(sliderH), 'fill-opacity': 0.45, 'fill-outline-color': 'rgba(0,0,0,0)' },
     });
     map.addSource('beam_src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    // line-dasharray はデータ駆動式 非対応 → 実線/破線を別レイヤに分ける
     map.addLayer({
       id: 'beam', type: 'line', source: 'beam_src',
-      paint: {
-        'line-color': ['get', 'color'],
-        'line-width': 3,
-        'line-dasharray': ['case', ['get', 'blocked'], ['literal', [1.5, 1.5]], ['literal', [1, 0]]],
-      },
+      filter: ['!', ['get', 'blocked']],
+      paint: { 'line-color': '#f59e0b', 'line-width': 3.5 },
+    });
+    map.addLayer({
+      id: 'beam-blocked', type: 'line', source: 'beam_src',
+      filter: ['get', 'blocked'],
+      paint: { 'line-color': '#8a8a8a', 'line-width': 3, 'line-dasharray': [1.5, 1.5] },
     });
     map.addSource('sel_src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({
@@ -418,7 +427,7 @@
       features: [{
         type: 'Feature',
         geometry: { type: 'LineString', coordinates: [[sel.lng, sel.lat], [f.lng, f.lat]] },
-        properties: { color: blocked ? '#8a8a8a' : '#f59e0b', blocked },
+        properties: { blocked },
       }],
     });
     map.getSource('sel_src').setData({
