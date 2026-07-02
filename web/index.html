@@ -4,22 +4,43 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>hanabi-view - 関西花火 視認エリアマップ</title>
+<meta property="og:title" content="hanabi-view | その場所から花火、見える？">
+<meta property="og:description" content="関西7大会の花火がどこから見えるかを地図で確認。現在地からワンタップ判定。">
+<meta name="twitter:card" content="summary">
 <link rel="stylesheet" href="./lib/maplibre-gl.css">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
   #map { width: 100%; height: 100vh; }
   #panel {
-    position: absolute; top: 12px; left: 12px; z-index: 1;
-    background: rgba(255,255,255,0.96); padding: 12px 16px; border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2); max-width: 340px;
+    position: absolute; top: 12px; left: 12px; z-index: 2;
+    background: rgba(255,255,255,0.96); padding: 12px 16px; border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.22); max-width: 340px;
+    max-height: calc(100vh - 60px); overflow-y: auto;
   }
   #panel h1 { margin: 0 0 8px; font-size: 16px; }
   #festival-select { width: 100%; padding: 6px; font-size: 14px; }
+  #geo-btn {
+    width: 100%; margin-top: 8px; padding: 10px 8px; font-size: 14px; font-weight: 700;
+    background: #e91e8c; color: #fff; border: none; border-radius: 8px; cursor: pointer;
+  }
+  #geo-btn:active { transform: scale(0.98); }
+  #geo-btn:disabled { background: #ccc; cursor: wait; }
   #festival-info { margin-top: 8px; font-size: 12px; color: #444; line-height: 1.6; }
   #festival-info .note { color: #999; font-size: 11px; }
+  #slider-row { margin-top: 10px; padding-top: 8px; border-top: 1px solid #eee; }
+  #slider-row label { font-size: 12px; color: #444; display: flex; justify-content: space-between; }
+  #slider-row #h-label { font-weight: 700; color: #e91e8c; }
+  #h-slider { width: 100%; margin-top: 4px; accent-color: #e91e8c; }
+  #slider-row .ticks { font-size: 10px; color: #999; display: flex; justify-content: space-between; }
   #result { margin-top: 10px; font-size: 13px; line-height: 1.7; border-top: 1px solid #eee; padding-top: 8px; }
   #result .big { font-size: 15px; font-weight: 700; }
   #result .sub { color: #666; font-size: 12px; }
+  #share-row { display: none; gap: 8px; margin-top: 8px; }
+  #share-row button, #share-row a {
+    flex: 1; padding: 8px 6px; font-size: 12px; text-align: center; cursor: pointer;
+    border: 1px solid #ccc; border-radius: 6px; background: #fff; color: #333; text-decoration: none;
+  }
+  #share-row a.x-share { background: #000; color: #fff; border-color: #000; font-weight: 700; }
   #legend {
     position: absolute; bottom: 30px; right: 12px; z-index: 1;
     background: rgba(255,255,255,0.96); padding: 8px 12px; border-radius: 6px;
@@ -27,22 +48,41 @@
   }
   #legend .row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
   #legend .swatch { width: 18px; height: 12px; border: 1px solid rgba(0,0,0,0.15); }
+  #tooltip {
+    position: absolute; z-index: 3; pointer-events: none; display: none;
+    background: rgba(20,20,20,0.85); color: #fff; padding: 5px 9px; border-radius: 5px;
+    font-size: 12px; line-height: 1.5; white-space: nowrap;
+  }
   .attribution {
     position: absolute; bottom: 4px; left: 4px; z-index: 1;
     background: rgba(255,255,255,0.8); padding: 2px 6px; font-size: 10px;
     border-radius: 3px;
+  }
+  @media (max-width: 480px) {
+    #panel { left: 8px; right: 8px; max-width: none; top: 8px; }
+    #legend { bottom: 24px; right: 8px; font-size: 11px; }
   }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="panel">
-  <h1>関西花火 視認エリア</h1>
+  <h1>関西花火 視認エリア 🎆</h1>
   <select id="festival-select">
     <option value="">花火大会を選択...</option>
   </select>
+  <button id="geo-btn">📍 現在地から見えるか調べる</button>
   <div id="festival-info"></div>
-  <div id="result">地図の色付きエリアをクリックすると<br>その場所からの見え方を表示</div>
+  <div id="slider-row">
+    <label>花火の高さで絞り込み <span id="h-label"></span></label>
+    <input type="range" id="h-slider" min="30" max="330" step="10">
+    <div class="ticks"><span>小玉</span><span>5号=190m</span><span>尺玉=330m</span></div>
+  </div>
+  <div id="result">地図をクリック or 📍ボタンで<br>その場所からの見え方を判定</div>
+  <div id="share-row">
+    <a class="x-share" id="x-share" target="_blank" rel="noopener">𝕏 でシェア</a>
+    <button id="copy-btn">リンクをコピー</button>
+  </div>
   <div style="margin-top:8px; font-size:10.5px; color:#999; line-height:1.5;">
     ※建物・地形のみで計算した目安です。樹木・電線等は未考慮。実際の見え方を保証するものではありません。
     <a href="https://github.com/itsuki0427/hanabi-view" target="_blank" rel="noopener" style="color:#999;">詳細</a>
@@ -55,7 +95,9 @@
   <div class="row"><span class="swatch" style="background:#ffffbf"></span>高い花火だけ見える</div>
   <div class="row"><span class="swatch" style="background:#fdae61"></span>大玉の上部だけ</div>
   <div class="row"><span class="swatch" style="background:#d73027"></span>ほぼ見えない</div>
+  <div class="row"><span class="swatch" style="background:#c8c8c8"></span>この高さでは見えない</div>
 </div>
+<div id="tooltip"></div>
 <div class="attribution">地図: 国土地理院 / 建物: PLATEAU（国土交通省）</div>
 
 <script src="./lib/maplibre-gl.js"></script>
@@ -77,41 +119,85 @@
     center: [135.5, 34.72],
     zoom: 11,
   });
+  map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
   let festivals = [];
   let currentFestival = null;
+  let resultData = null;      // 選択中大会の GeoJSON
+  let sliderH = 330;          // スライダーの高さ(m)
+  let selected = null;        // {lng, lat, props}
 
-  const FILL_COLOR = [
-    'case',
-    ['==', ['get', 'min_h'], -1], '#d73027',
-    ['<=', ['get', 'min_h'], 30], '#1a9850',
-    ['<=', ['get', 'min_h'], 100], '#a6d96a',
-    ['<=', ['get', 'min_h'], 200], '#ffffbf',
-    '#fdae61',
-  ];
+  const $ = id => document.getElementById(id);
 
-  // 'load' はタイル取得完了まで待つ（ネットワーク不調で発火しないことあり）
-  // addSource/addLayer に必要なのはスタイル読込のみ → 'style.load' で初期化
-  map.on('style.load', () => {
+  // ---- 色: スライダー高さ h で「見える/見えない」を塗り分け ----
+  function fillColorExpr(h) {
+    return [
+      'case',
+      ['==', ['get', 'min_h'], -1], 'rgba(200,200,200,0.55)',
+      ['>', ['get', 'min_h'], h], 'rgba(200,200,200,0.55)',
+      ['<=', ['get', 'min_h'], 30], '#1a9850',
+      ['<=', ['get', 'min_h'], 100], '#a6d96a',
+      ['<=', ['get', 'min_h'], 200], '#ffffbf',
+      '#fdae61',
+    ];
+  }
+
+  function updateColors() {
+    if (map.getLayer('viz')) {
+      map.setPaintProperty('viz', 'fill-color', fillColorExpr(sliderH));
+    }
+  }
+
+  // ---- スライダー ----
+  const slider = $('h-slider');
+  function setSlider(h, max) {
+    if (max) slider.max = max;
+    slider.value = h;
+    sliderH = h;
+    $('h-label').textContent = `${h}m まで上がる花火`;
+  }
+  slider.addEventListener('input', () => {
+    sliderH = parseInt(slider.value, 10);
+    $('h-label').textContent = `${sliderH}m まで上がる花火`;
+    updateColors();
+    if (selected) showResult(selected, { updateShare: true });
+  });
+
+  // ---- 初期化（地図スタイル読込とは独立に開始。遅い回線でもパネルが先に使える） ----
+  function whenStyleReady(cb) {
+    if (map.isStyleLoaded()) { cb(); return; }
+    map.once('style.load', cb);
+  }
+
+  (() => {
     fetch('./data/festivals.json?t=' + Date.now())
       .then(r => r.json())
       .then(list => {
         festivals = list;
-        const sel = document.getElementById('festival-select');
+        const sel = $('festival-select');
         list.forEach(f => {
           const opt = document.createElement('option');
           opt.value = f.id;
           opt.textContent = f.name;
           sel.appendChild(opt);
         });
-        if (list.length > 0) {
-          sel.value = list[0].id;
-          loadFestival(list[0].id);
+        // URLパラメータ復元 (?f=&lat=&lng=&h=)
+        const p = new URLSearchParams(location.search);
+        const fid = parseInt(p.get('f'), 10);
+        const target = festivals.find(x => x.id === fid) || list[0];
+        if (target) {
+          sel.value = target.id;
+          loadFestival(target.id, () => {
+            const lat = parseFloat(p.get('lat')), lng = parseFloat(p.get('lng'));
+            const h = parseInt(p.get('h'), 10);
+            if (h && h >= 30) { setSlider(Math.min(h, parseInt(slider.max, 10))); updateColors(); }
+            if (!isNaN(lat) && !isNaN(lng)) selectPointAt(lng, lat, { fly: true });
+          });
         }
       });
-  });
+  })();
 
-  document.getElementById('festival-select').addEventListener('change', (e) => {
+  $('festival-select').addEventListener('change', (e) => {
     if (e.target.value) loadFestival(parseInt(e.target.value, 10));
   });
 
@@ -121,37 +207,59 @@
     if (f.height_provisional) notes.push('※花火の高さは暫定値（5号相当で計算）');
     if (f.ui_note) notes.push('※' + f.ui_note);
     const dateStr = f.date ? `${f.date}（${f.time}）` : '日程未発表';
-    document.getElementById('festival-info').innerHTML =
+    $('festival-info').innerHTML =
       `<div>📅 ${dateStr}</div>` +
       `<div>📍 ${f.city} ／ 最大${f.max_shaku}号玉（開花 約${Math.round(f.max_burst_height_m)}m）</div>` +
       `<div><a href="${f.source_url}" target="_blank" rel="noopener">大会公式情報</a></div>` +
       notes.map(n => `<div class="note">${n}</div>`).join('');
   }
 
-  function loadFestival(id) {
+  function loadFestival(id, onReady) {
     const f = festivals.find(x => x.id === id);
     if (!f) return;
     currentFestival = f;
+    selected = null;
+    $('share-row').style.display = 'none';
     showFestivalInfo(f);
+    const maxH = Math.round(f.max_burst_height_m);
+    setSlider(maxH, maxH);
     map.flyTo({ center: [f.lng, f.lat], zoom: 12 });
 
     fetch(`./data/result_${id}.geojson?t=` + Date.now())
-      .then(r => {
-        if (!r.ok) throw new Error('結果データなし');
-        return r.json();
-      })
+      .then(r => { if (!r.ok) throw new Error('結果データなし'); return r.json(); })
       .then(data => {
-        for (const layerId of ['viz', 'launch']) {
+        resultData = data;
+        if (onReady) onReady();  // 判定・復元はデータのみで可能。レイヤはスタイル読込後に追従
+        whenStyleReady(() => setupLayers(f, data));
+      })
+      .catch((err) => { $('result').textContent = `結果データ未生成: ${err.message}`; });
+  }
+
+  function setupLayers(f, data) {
+        for (const layerId of ['viz', 'beam', 'launch', 'sel-pt']) {
           if (map.getLayer(layerId)) map.removeLayer(layerId);
         }
-        for (const srcId of ['result', 'launch_src']) {
+        for (const srcId of ['result', 'beam_src', 'launch_src', 'sel_src']) {
           if (map.getSource(srcId)) map.removeSource(srcId);
         }
-
         map.addSource('result', { type: 'geojson', data });
         map.addLayer({
           id: 'viz', type: 'fill', source: 'result',
-          paint: { 'fill-color': FILL_COLOR, 'fill-opacity': 0.45, 'fill-outline-color': 'rgba(0,0,0,0)' },
+          paint: { 'fill-color': fillColorExpr(sliderH), 'fill-opacity': 0.45, 'fill-outline-color': 'rgba(0,0,0,0)' },
+        });
+        map.addSource('beam_src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addLayer({
+          id: 'beam', type: 'line', source: 'beam_src',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 3,
+            'line-dasharray': ['case', ['get', 'blocked'], ['literal', [1.5, 1.5]], ['literal', [1, 0]]],
+          },
+        });
+        map.addSource('sel_src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addLayer({
+          id: 'sel-pt', type: 'circle', source: 'sel_src',
+          paint: { 'circle-radius': 7, 'circle-color': '#2563eb', 'circle-stroke-width': 2.5, 'circle-stroke-color': '#fff' },
         });
         map.addSource('launch_src', {
           type: 'geojson',
@@ -159,40 +267,150 @@
         });
         map.addLayer({
           id: 'launch', type: 'circle', source: 'launch_src',
-          paint: {
-            'circle-radius': 9,
-            'circle-color': '#e91e8c',
-            'circle-stroke-width': 2.5,
-            'circle-stroke-color': '#fff',
-          },
+          paint: { 'circle-radius': 9, 'circle-color': '#e91e8c', 'circle-stroke-width': 2.5, 'circle-stroke-color': '#fff' },
         });
-      })
-      .catch((err) => {
-        document.getElementById('result').textContent = `結果データ未生成: ${err.message}`;
-      });
+        // 復元済みの選択地点があればビームを引き直す
+        if (selected) drawBeam(selected);
   }
 
-  map.on('click', 'viz', (e) => {
-    if (!currentFestival) return;
-    const p = e.features[0].properties;
-    const maxH = currentFestival.max_burst_height_m;
+  // ---- 地点選択（クリック / 現在地 / URL復元 共通） ----
+  function cellCenter(feat) {
+    const ring = feat.geometry.coordinates[0];
+    return [(ring[0][0] + ring[2][0]) / 2, (ring[0][1] + ring[2][1]) / 2];
+  }
+
+  function findCell(lng, lat) {
+    if (!resultData) return null;
+    let best = null, bestD = Infinity;
+    for (const feat of resultData.features) {
+      const [clng, clat] = cellCenter(feat);
+      const d = (clng - lng) ** 2 + (clat - lat) ** 2;
+      if (d < bestD) { bestD = d; best = feat; }
+    }
+    // 250mメッシュの2セル分より遠い = 計算範囲外
+    if (best && Math.sqrt(bestD) > 0.006) return null;
+    return best;
+  }
+
+  function selectPointAt(lng, lat, opts = {}) {
+    const feat = findCell(lng, lat);
+    if (!feat) {
+      $('result').innerHTML = '<div class="big">計算範囲外</div><div class="sub">この大会の計算範囲は打上地点から±10kmです</div>';
+      $('share-row').style.display = 'none';
+      return;
+    }
+    selected = { lng, lat, props: feat.properties };
+    if (opts.fly) map.flyTo({ center: [lng, lat], zoom: 13 });
+    showResult(selected, { updateShare: true });
+    drawBeam(selected);
+  }
+
+  function visibleAt(props, h) {
+    return props.min_h !== -1 && props.min_h <= h;
+  }
+
+  function showResult(sel, opts = {}) {
+    const p = sel.props;
+    const f = currentFestival;
     let headline, sub;
     if (p.min_h === -1) {
-      headline = 'ここからは ほぼ見えない';
+      headline = 'ここからは ほぼ見えない 😢';
       sub = '建物・地形に遮られる（音だけ楽しめるかも）';
+    } else if (!visibleAt(p, sliderH)) {
+      headline = `${sliderH}m の花火は見えない`;
+      sub = `ここは高度 ${p.min_h}m 以上なら見える場所。スライダーを上げてみて`;
     } else if (p.min_h === 0) {
-      headline = '低い花火まで ほぼ全部見える';
+      headline = '低い花火まで ほぼ全部見える 🎆';
       sub = '遮るものなし。特等席クラス';
     } else {
       const visiblePct = Math.round((1 - p.ratio) * 100);
-      headline = `高度 ${p.min_h}m 以上の花火が見える`;
-      sub = `打上高度範囲の約${visiblePct}%が視認可（この大会の最大開花高度 約${Math.round(maxH)}m）`;
+      headline = `高度 ${p.min_h}m 以上の花火が見える 🎇`;
+      sub = `打上高度範囲の約${visiblePct}%が視認可（この大会の最大 約${Math.round(f.max_burst_height_m)}m）`;
     }
-    document.getElementById('result').innerHTML =
-      `<div class="big">${headline}</div><div class="sub">${sub}</div>`;
+    $('result').innerHTML = `<div class="big">${headline}</div><div class="sub">${sub}</div>`;
+
+    if (opts.updateShare) {
+      const url = `${location.origin}${location.pathname}?f=${f.id}&lat=${sel.lat.toFixed(5)}&lng=${sel.lng.toFixed(5)}&h=${sliderH}`;
+      history.replaceState(null, '', url);
+      const emoji = p.min_h === -1 ? '😢' : (p.min_h === 0 ? '🎆特等席だった' : '🎇');
+      const text = `${f.name}、この場所から${p.min_h === -1 ? 'ほぼ見えないらしい' : (p.min_h === 0 ? 'ほぼ全部見えるらしい' : `高度${p.min_h}m以上なら見えるらしい`)} ${emoji}\n#hanabiview`;
+      $('x-share').href = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+      $('share-row').style.display = 'flex';
+    }
+  }
+
+  $('copy-btn').addEventListener('click', () => {
+    navigator.clipboard.writeText(location.href).then(() => {
+      $('copy-btn').textContent = 'コピーした！';
+      setTimeout(() => { $('copy-btn').textContent = 'リンクをコピー'; }, 1500);
+    });
   });
-  map.on('mouseenter', 'viz', () => { map.getCanvas().style.cursor = 'pointer'; });
-  map.on('mouseleave', 'viz', () => { map.getCanvas().style.cursor = ''; });
+
+  // ---- 視線ビーム ----
+  function drawBeam(sel) {
+    if (!map.getSource('beam_src')) return;  // レイヤ未生成（地図読込前）なら判定表示のみ
+    const f = currentFestival;
+    const blocked = !visibleAt(sel.props, sliderH);
+    const beam = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [[sel.lng, sel.lat], [f.lng, f.lat]] },
+        properties: { color: blocked ? '#8a8a8a' : '#f59e0b', blocked },
+      }],
+    };
+    map.getSource('beam_src').setData(beam);
+    map.getSource('sel_src').setData({
+      type: 'Feature', geometry: { type: 'Point', coordinates: [sel.lng, sel.lat] }, properties: {},
+    });
+  }
+
+  map.on('click', 'viz', (e) => {
+    selectPointAt(e.lngLat.lng, e.lngLat.lat);
+  });
+
+  // ---- 現在地判定 ----
+  $('geo-btn').addEventListener('click', () => {
+    if (!navigator.geolocation) {
+      $('result').textContent = 'この端末では位置情報を取得できません';
+      return;
+    }
+    const btn = $('geo-btn');
+    btn.disabled = true; btn.textContent = '位置を取得中...';
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        btn.disabled = false; btn.textContent = '📍 現在地から見えるか調べる';
+        selectPointAt(pos.coords.longitude, pos.coords.latitude, { fly: true });
+      },
+      () => {
+        btn.disabled = false; btn.textContent = '📍 現在地から見えるか調べる';
+        $('result').innerHTML = '<div class="sub">位置情報が取得できなかった。ブラウザの位置情報許可を確認してみて</div>';
+      },
+      { enableHighAccuracy: false, timeout: 8000 }
+    );
+  });
+
+  // ---- ホバーツールチップ（マウス環境のみ） ----
+  if (window.matchMedia('(hover: hover)').matches) {
+    const tip = $('tooltip');
+    map.on('mousemove', 'viz', (e) => {
+      const p = e.features[0].properties;
+      let text;
+      if (p.min_h === -1) text = 'ほぼ見えない';
+      else if (p.min_h > sliderH) text = `${p.min_h}m以上なら見える（今の設定では見えない）`;
+      else if (p.min_h === 0) text = 'ほぼ全部見える 🎆';
+      else text = `高度 ${p.min_h}m 以上が見える`;
+      tip.textContent = text;
+      tip.style.display = 'block';
+      tip.style.left = (e.point.x + 14) + 'px';
+      tip.style.top = (e.point.y + 14) + 'px';
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', 'viz', () => {
+      tip.style.display = 'none';
+      map.getCanvas().style.cursor = '';
+    });
+  }
 </script>
 </body>
 </html>
