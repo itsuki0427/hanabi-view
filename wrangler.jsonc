@@ -1,0 +1,8 @@
+{
+  // Cloudflare Workers 静的アセット配信設定（Workerスクリプトなし・配信のみ）
+  "name": "hanabi-view",
+  "compatibility_date": "2026-07-02",
+  "assets": {
+    "directory": "./web"
+  }
+}
