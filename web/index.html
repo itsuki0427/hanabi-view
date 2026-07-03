@@ -382,8 +382,10 @@
       $('share-row').style.display = 'none';
       return;
     }
-    selected = { lng, lat, props: feat.properties };
-    if (opts.fly) map.flyTo({ center: [lng, lat], zoom: 13 });
+    // 判定・遮蔽点は全部メッシュ中心基準で事前計算されている → 選択点も中心にスナップ
+    const [clng, clat] = cellCenter(feat);
+    selected = { lng: clng, lat: clat, props: feat.properties };
+    if (opts.fly) map.flyTo({ center: [clng, clat], zoom: 13 });
     showResult(selected, { updateShare: true });
     drawBeam(selected);
     const xs = $('xsection');
