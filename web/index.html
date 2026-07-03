@@ -123,6 +123,12 @@
     <button id="copy-btn">リンクをコピー</button>
   </div>
 
+  <details id="xsection" style="margin-top:10px; display:none;">
+    <summary style="cursor:pointer; color:#666; font-size:12px; padding:4px 0;">📈 なぜ見える/見えない（断面図）</summary>
+    <div id="xsection-body" style="margin-top:6px;"></div>
+    <div style="font-size:10px; color:#aaa; margin-top:2px;">横=距離 / 縦=高さ（灰=建物・茶=地形・点線=視線）</div>
+  </details>
+
   <details id="info">
     <summary>大会情報・データについて</summary>
     <div id="festival-info"></div>
@@ -221,7 +227,12 @@
     sliderH = parseInt(slider.value, 10);
     $('h-label').textContent = `${sliderH}m まで上がる花火`;
     updateColors();
-    if (selected) showResult(selected, { updateShare: true });
+    if (selected) {
+      showResult(selected, { updateShare: true });
+      drawBeam(selected);
+      const xs = $('xsection');
+      if (xs.open) renderXSection(selected);
+    }
   });
 
   // ---- 初期化（地図スタイル読込とは独立） ----
@@ -275,6 +286,8 @@
     currentFestival = f;
     selected = null;
     $('share-row').style.display = 'none';
+    $('xsection').style.display = 'none';
+    $('xsection-body').innerHTML = '';
     $('result').className = '';
     $('result').innerHTML = '地図をタップ or 📍ボタンで<br>その場所から花火が見えるか判定';
     showFestivalInfo(f);
@@ -373,6 +386,9 @@
     if (opts.fly) map.flyTo({ center: [lng, lat], zoom: 13 });
     showResult(selected, { updateShare: true });
     drawBeam(selected);
+    const xs = $('xsection');
+    xs.style.display = 'block';
+    if (xs.open) renderXSection(selected);
   }
 
   function visibleAt(props, h) {
@@ -473,6 +489,146 @@
 
   map.on('click', 'viz', (e) => {
     selectPointAt(e.lngLat.lng, e.lngLat.lat);
+  });
+
+  // ---- 断面図 ----
+  // 地形 = 地理院標高タイルをブラウザで直接デコード / 建物 = 事前生成の高さラスタPNG
+  const demTileCache = new Map();
+  const bldgRasterCache = new Map();
+
+  function latlngToTilePixel(lat, lng, z) {
+    const n = 2 ** z;
+    const xf = (lng + 180) / 360 * n;
+    const latRad = lat * Math.PI / 180;
+    const yf = (1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2 * n;
+    const tx = Math.floor(xf), ty = Math.floor(yf);
+    return { tx, ty, px: Math.floor((xf - tx) * 256), py: Math.floor((yf - ty) * 256) };
+  }
+
+  function loadImageData(url) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = img.width; c.height = img.height;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0);
+        try { resolve(ctx.getImageData(0, 0, img.width, img.height)); }
+        catch (e) { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
+  async function demElevation(lat, lng) {
+    const z = 14;
+    const { tx, ty, px, py } = latlngToTilePixel(lat, lng, z);
+    const key = `${tx}/${ty}`;
+    if (!demTileCache.has(key)) {
+      demTileCache.set(key, loadImageData(`https://cyberjapandata.gsi.go.jp/xyz/dem_png/${z}/${tx}/${ty}.png`));
+    }
+    const d = await demTileCache.get(key);
+    if (!d) return 0;
+    const i = (py * d.width + px) * 4;
+    const r = d.data[i], g = d.data[i + 1], b = d.data[i + 2];
+    if (r === 128 && g === 0 && b === 0) return 0;
+    let x = r * 65536 + g * 256 + b;
+    if (x >= 2 ** 23) x -= 2 ** 24;
+    return x * 0.01;
+  }
+
+  function getBldgRaster(fid) {
+    if (!bldgRasterCache.has(fid)) {
+      bldgRasterCache.set(fid, (async () => {
+        const meta = await fetch(`./data/bldg_${fid}.json`).then(r => r.ok ? r.json() : null).catch(() => null);
+        if (!meta) return null;
+        const imgData = await loadImageData(`./data/bldg_${fid}.png`);
+        if (!imgData) return null;
+        return { meta, imgData };
+      })());
+    }
+    return bldgRasterCache.get(fid);
+  }
+
+  function bldgHeightAt(raster, lat, lng) {
+    const [lngMin, latMin, lngMax, latMax] = raster.meta.bbox;
+    if (lng < lngMin || lng > lngMax || lat < latMin || lat > latMax) return 0;
+    const col = Math.min(Math.floor((lng - lngMin) / (lngMax - lngMin) * raster.meta.px_w), raster.meta.px_w - 1);
+    const row = Math.min(Math.floor((latMax - lat) / (latMax - latMin) * raster.meta.px_h), raster.meta.px_h - 1);
+    return raster.imgData.data[(row * raster.imgData.width + col) * 4];
+  }
+
+  async function renderXSection(sel) {
+    const body = $('xsection-body');
+    body.innerHTML = '<div style="font-size:11px;color:#999;">断面を計算中...</div>';
+    const f = currentFestival;
+    const N = 100;
+    const raster = await getBldgRaster(f.id);
+    const pts = [];
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      pts.push({ t, lng: sel.lng + (f.lng - sel.lng) * t, lat: sel.lat + (f.lat - sel.lat) * t });
+    }
+    const grounds = await Promise.all(pts.map(p => demElevation(p.lat, p.lng)));
+    if (selected !== sel) return;  // 別地点に切り替わってたら破棄
+    const bldgs = pts.map(p => (raster ? bldgHeightAt(raster, p.lat, p.lng) : 0));
+
+    const W = 320, H = 150, PAD_B = 14;
+    const launchGround = grounds[N];
+    const gMin = Math.min(...grounds);
+    const yTop = Math.max(...grounds.map((g, i) => g + bldgs[i]), launchGround + sliderH) * 1.08 + 5;
+    const yScale = (H - PAD_B) / (yTop - gMin);
+    const X = t => t * W;
+    const Y = v => (H - PAD_B) - (v - gMin) * yScale;
+
+    // 地形ポリゴン
+    let groundPath = `M0,${H - PAD_B} `;
+    pts.forEach((p, i) => { groundPath += `L${X(p.t).toFixed(1)},${Y(grounds[i]).toFixed(1)} `; });
+    groundPath += `L${W},${H - PAD_B} Z`;
+
+    // 建物バー
+    let bldgRects = '';
+    const barW = W / N + 0.6;
+    pts.forEach((p, i) => {
+      if (bldgs[i] > 0) {
+        const y1 = Y(grounds[i] + bldgs[i]), y2 = Y(grounds[i]);
+        bldgRects += `<rect x="${(X(p.t) - barW / 2).toFixed(1)}" y="${y1.toFixed(1)}" width="${barW.toFixed(1)}" height="${(y2 - y1).toFixed(1)}" fill="#9ca3af"/>`;
+      }
+    });
+
+    // 視線（観測点の目線 → スライダー高さの花火）
+    const eyeY = Y(grounds[0] + 1.6);
+    const burstY = Y(launchGround + sliderH);
+    const seen = visibleAt(sel.props, sliderH);
+    const sightColor = seen ? '#f59e0b' : '#d73027';
+
+    // 遮蔽点の縦線
+    let blockMark = '';
+    if (sel.props.bx !== undefined) {
+      const dTotal = Math.hypot(f.lng - sel.lng, f.lat - sel.lat);
+      const tBlock = dTotal > 0 ? Math.hypot(sel.props.bx - sel.lng, sel.props.by - sel.lat) / dTotal : 0;
+      blockMark = `<line x1="${X(tBlock).toFixed(1)}" y1="0" x2="${X(tBlock).toFixed(1)}" y2="${H - PAD_B}" stroke="#d73027" stroke-width="1" stroke-dasharray="2,2" opacity="0.7"/>`;
+    }
+
+    const distKm = (Math.hypot((f.lat - sel.lat) * 111, (f.lng - sel.lng) * 111 * Math.cos(sel.lat * Math.PI / 180))).toFixed(1);
+    body.innerHTML =
+      `<svg viewBox="0 0 ${W} ${H}" style="width:100%; background:#f0f6ff; border-radius:6px;">` +
+      `<path d="${groundPath}" fill="#d7c4a3"/>` +
+      bldgRects +
+      blockMark +
+      `<line x1="0" y1="${eyeY.toFixed(1)}" x2="${W}" y2="${burstY.toFixed(1)}" stroke="${sightColor}" stroke-width="1.6" stroke-dasharray="5,3"/>` +
+      `<text x="${W - 8}" y="${Math.max(burstY - 6, 12).toFixed(1)}" text-anchor="end" font-size="14">🎆</text>` +
+      `<text x="3" y="${(eyeY - 6).toFixed(1)}" font-size="11">📍</text>` +
+      `<text x="3" y="${H - 3}" font-size="9" fill="#666">現在地</text>` +
+      `<text x="${W - 3}" y="${H - 3}" text-anchor="end" font-size="9" fill="#666">打上地点（${distKm}km先）</text>` +
+      `</svg>`;
+  }
+
+  const xsectionEl = $('xsection');
+  xsectionEl.addEventListener('toggle', () => {
+    if (xsectionEl.open && selected) renderXSection(selected);
   });
 
   // ---- 現在地判定 ----
