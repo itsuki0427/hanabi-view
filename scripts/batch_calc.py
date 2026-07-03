@@ -149,11 +149,18 @@ def calc_festival(fest: dict, store: DemTileStore):
         if store.is_sea(lng, lat):
             skipped_sea += 1
         else:
-            min_h, ratio = calc_visibility(
+            min_h, ratio, block_lng, block_lat = calc_visibility(
                 fest["lng"], fest["lat"], fest["max_burst_height_m"],
                 lng, lat,
                 get_ground_z, get_building_top_z,
             )
+            props = {
+                "min_h": -1 if min_h is None else int(round(min_h)),
+                "ratio": round(ratio, 3),
+            }
+            if block_lng is not None:
+                props["bx"] = round(block_lng, 6)
+                props["by"] = round(block_lat, 6)
             half_lat, half_lng = step_lat / 2, step_lng / 2
             features.append({
                 "type": "Feature",
@@ -164,10 +171,7 @@ def calc_festival(fest: dict, store: DemTileStore):
                     [round(lng - half_lng, 6), round(lat + half_lat, 6)],
                     [round(lng - half_lng, 6), round(lat - half_lat, 6)],
                 ]]},
-                "properties": {
-                    "min_h": -1 if min_h is None else int(round(min_h)),
-                    "ratio": round(ratio, 3),
-                },
+                "properties": props,
             })
         done = i + 1
         if done % CHECKPOINT_EVERY == 0 or done == len(cells):

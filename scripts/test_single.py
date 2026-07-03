@@ -81,7 +81,7 @@ def main():
     print(f"{'観測点':<20} {'最低視認高度':>12} {'障害物率':>10}")
     print("-" * 50)
     for name, lng, lat in OBSERVERS:
-        min_h, ratio = calc_visibility(
+        min_h, ratio, _bx, _by = calc_visibility(
             LAUNCH["lng"], LAUNCH["lat"], LAUNCH["max_burst_height_m"],
             lng, lat,
             get_ground_z, get_building_top_z,

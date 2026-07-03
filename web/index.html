@@ -299,10 +299,10 @@
   }
 
   function setupLayers(f, data) {
-    for (const layerId of ['viz', 'beam', 'beam-blocked', 'launch', 'sel-pt']) {
+    for (const layerId of ['viz', 'beam', 'beam-blocked', 'block-pt', 'launch', 'sel-pt']) {
       if (map.getLayer(layerId)) map.removeLayer(layerId);
     }
-    for (const srcId of ['result', 'beam_src', 'launch_src', 'sel_src']) {
+    for (const srcId of ['result', 'beam_src', 'block_src', 'launch_src', 'sel_src']) {
       if (map.getSource(srcId)) map.removeSource(srcId);
     }
     map.addSource('result', { type: 'geojson', data });
@@ -321,6 +321,11 @@
       id: 'beam-blocked', type: 'line', source: 'beam_src',
       filter: ['get', 'blocked'],
       paint: { 'line-color': '#8a8a8a', 'line-width': 3, 'line-dasharray': [1.5, 1.5] },
+    });
+    map.addSource('block_src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'block-pt', type: 'circle', source: 'block_src',
+      paint: { 'circle-radius': 6, 'circle-color': '#d73027', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' },
     });
     map.addSource('sel_src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({
@@ -374,13 +379,24 @@
     return props.min_h !== -1 && props.min_h <= h;
   }
 
+  function blockDistText(sel) {
+    const p = sel.props;
+    if (p.bx === undefined) return '';
+    const dm = Math.hypot(
+      (p.by - sel.lat) * 111000,
+      (p.bx - sel.lng) * 111000 * Math.cos(sel.lat * Math.PI / 180)
+    );
+    return dm < 950 ? `約${Math.round(dm / 10) * 10}m先` : `約${(dm / 1000).toFixed(1)}km先`;
+  }
+
   function showResult(sel, opts = {}) {
     const p = sel.props;
     const f = currentFestival;
     let headline, sub, cls;
     if (p.min_h === -1) {
       headline = 'ここからは ほぼ見えない 😢';
-      sub = '建物・地形に遮られる（音だけ楽しめるかも）';
+      const d = blockDistText(sel);
+      sub = d ? `${d}の建物・地形に遮られる（音だけ楽しめるかも）` : '建物・地形に遮られる（音だけ楽しめるかも）';
       cls = 'ng';
     } else if (!visibleAt(p, sliderH)) {
       headline = `${sliderH}m の花火は見えない`;
@@ -418,18 +434,38 @@
   });
 
   // ---- 視線ビーム ----
+  // 見える: 観測点→打上 全区間オレンジ実線
+  // 遮られる + 遮蔽点あり: 観測点→遮蔽点 オレンジ実線 + 遮蔽点→打上 グレー破線 + 遮蔽点マーカー
   function drawBeam(sel) {
     if (!map.getSource('beam_src')) return;
     const f = currentFestival;
-    const blocked = !visibleAt(sel.props, sliderH);
-    map.getSource('beam_src').setData({
-      type: 'FeatureCollection',
-      features: [{
+    const p = sel.props;
+    const blocked = !visibleAt(p, sliderH);
+    const hasBlockPt = p.bx !== undefined && p.by !== undefined;
+    const features = [];
+    let blockPt = { type: 'FeatureCollection', features: [] };
+
+    if (blocked && hasBlockPt) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [[sel.lng, sel.lat], [p.bx, p.by]] },
+        properties: { blocked: false },
+      });
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [[p.bx, p.by], [f.lng, f.lat]] },
+        properties: { blocked: true },
+      });
+      blockPt = { type: 'Feature', geometry: { type: 'Point', coordinates: [p.bx, p.by] }, properties: {} };
+    } else {
+      features.push({
         type: 'Feature',
         geometry: { type: 'LineString', coordinates: [[sel.lng, sel.lat], [f.lng, f.lat]] },
         properties: { blocked },
-      }],
-    });
+      });
+    }
+    map.getSource('beam_src').setData({ type: 'FeatureCollection', features });
+    map.getSource('block_src').setData(blockPt);
     map.getSource('sel_src').setData({
       type: 'Feature', geometry: { type: 'Point', coordinates: [sel.lng, sel.lat] }, properties: {},
     });

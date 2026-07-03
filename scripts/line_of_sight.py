@@ -8,9 +8,10 @@
         建物が無い点は get_ground_z と同値を返す
 
 出力:
-    (min_visible_height_m, obstacle_ratio)
+    (min_visible_height_m, obstacle_ratio, block_lng, block_lat)
     min_visible_height_m: 最低視認高度（観測点から見える最低の花火高度）。None なら全範囲遮蔽
     obstacle_ratio: 打上高度範囲のうち遮蔽されてる割合 (0.0-1.0)
+    block_lng/lat: 「見えない高さ」の視線が最初に遮られる地点。全部見える場合は None
 
 座標系:
     入力は WGS84 (lng, lat)
@@ -39,7 +40,7 @@ def calc_visibility(
     obs_lat: float,
     get_ground_z: Callable[[float, float], float],
     get_building_top_z: Callable[[float, float], float],
-) -> tuple[float | None, float]:
+) -> tuple[float | None, float, float | None, float | None]:
     lx, ly = _TO_M.transform(launch_lng, launch_lat)
     ox, oy = _TO_M.transform(obs_lng, obs_lat)
 
@@ -70,8 +71,23 @@ def calc_visibility(
         blocked = bool(np.any(line_z[1:-1] < obstacle_z[1:-1]))
         visible_flags[i] = not blocked
 
+    def first_block_point(h: float) -> tuple[float, float] | None:
+        """高さ h の視線が最初に遮られるサンプル点の (lng, lat)"""
+        burst_z = launch_ground + h
+        line_z = obs_eye_z + (burst_z - obs_eye_z) * ts
+        blocked_idx = np.where(line_z[1:-1] < obstacle_z[1:-1])[0]
+        if len(blocked_idx) == 0:
+            return None
+        i = int(blocked_idx[0]) + 1
+        return float(lngs[i]), float(lats[i])
+
     if not visible_flags.any():
-        return None, 1.0
+        bp = first_block_point(float(heights[-1]))
+        return None, 1.0, (bp[0] if bp else None), (bp[1] if bp else None)
     min_visible_height = float(heights[visible_flags.argmax()])
     obstacle_ratio = float(1.0 - visible_flags.mean())
-    return min_visible_height, obstacle_ratio
+    if min_visible_height <= 0.0:
+        return min_visible_height, obstacle_ratio, None, None
+    # 「見えない最高の高さ」（min_h の1段下）の遮蔽点 = 何に遮られてるかの代表点
+    bp = first_block_point(min_visible_height - HEIGHT_STEP_M)
+    return min_visible_height, obstacle_ratio, (bp[0] if bp else None), (bp[1] if bp else None)
